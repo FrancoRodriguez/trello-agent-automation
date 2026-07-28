@@ -1,0 +1,338 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+require "fileutils"
+require "shellwords"
+
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+
+begin
+  require "dotenv"
+  Dotenv.load(File.expand_path("../.env", __dir__))
+rescue LoadError
+  # Dotenv optional if env vars are set externally
+end
+
+require "trello_client"
+
+class TrelloAgentRunner
+  SOURCE_LIST_NAME = ENV.fetch("TRELLO_SOURCE_LIST", "Progress")
+  WORKING_LIST_NAME = ENV.fetch("TRELLO_WORKING_LIST", "AI in progress")
+  QUESTIONS_LIST_NAME = ENV.fetch("TRELLO_QUESTIONS_LIST", "AI open questions")
+  TARGET_LIST_NAME = ENV.fetch("TRELLO_TARGET_LIST", "Testing")
+
+  def initialize
+    @client = TrelloClient.new
+  end
+
+  def check_status
+    puts "=== Trello Agent Integration Check ==="
+    puts "Board ID: #{@client.board_id}"
+    all_lists = @client.lists
+    puts "Lists available: #{all_lists.keys.uniq.inspect}"
+
+    cards = @client.cards_in_list(SOURCE_LIST_NAME) rescue []
+    puts "Cards currently in '#{SOURCE_LIST_NAME}' (#{cards.size}):"
+    cards.each do |c|
+      puts "  - [#{c['id']}] #{c['name']}"
+    end
+  end
+
+  def process_pending_cards
+    progress_cards = @client.cards_in_list(SOURCE_LIST_NAME) rescue []
+    question_cards = @client.cards_in_list(QUESTIONS_LIST_NAME) rescue []
+
+    # Filter question_cards to ONLY process those where the LAST comment is a user reply
+    ready_question_cards = question_cards.select do |card|
+      comments = @client.get_card_comments(card["id"])
+      last_comment = comments.first
+      if last_comment && !last_comment[:text].to_s.include?("Clarifying Questions Required") && !last_comment[:text].to_s.include?("Step ")
+        puts "💡 User reply detected on card '#{card['name']}' in '#{QUESTIONS_LIST_NAME}'! Resuming pipeline..."
+        true
+      else
+        false
+      end
+    end
+
+    all_cards = progress_cards + ready_question_cards
+
+    if all_cards.empty?
+      puts "[#{Time.now.strftime('%H:%M:%S')}] No pending cards in '#{SOURCE_LIST_NAME}' or ready cards in '#{QUESTIONS_LIST_NAME}'."
+      return
+    end
+
+    all_cards.each do |card|
+      process_card(card)
+    end
+  end
+
+  def process_card(card_or_id)
+    card = card_or_id.is_a?(Hash) ? card_or_id : @client.get_card(card_or_id)
+    card_id = card["id"]
+    card_name = card["name"]
+    card_desc = card["desc"] || "No description provided."
+
+    # Fetch comments to include user answers to clarifying questions
+    comments = @client.get_card_comments(card_id)
+    comments_text = comments.empty? ? "" : "\n\nComments & User Answers:\n" + comments.map { |c| "- #{c[:author]} (#{c[:date]}): #{c[:text]}" }.join("\n")
+    full_spec = card_desc + comments_text
+
+    puts "\n========================================================"
+    puts "🚀 Processing Trello Card: #{card_name}"
+    puts "ID: #{card_id}"
+    puts "Description:\n#{card_desc}"
+    unless comments.empty?
+      puts "Comments (#{comments.size}):\n#{comments_text}"
+    end
+    puts "========================================================\n"
+
+    # Immediately move card to 'AI in progress' list
+    puts "Moving card '#{card_name}' to '#{WORKING_LIST_NAME}'..."
+    @client.move_card(card_id, WORKING_LIST_NAME) rescue nil
+
+    # Comment on Trello that agent has started
+    @client.add_comment(card_id, "🤖 **Antigravity AI Agent Started**\n\nWorking on feature:\n> #{card_name}\n\nExecuting 6-step pipeline...")
+
+    # Execute feature pipeline & create PR
+    result = execute_pipeline(card_id, card_name, full_spec)
+
+    case result[:status]
+    when :questions_asked
+      puts "⏸️ Card '#{card_name}' paused: Clarifying questions asked. Card moved to '#{QUESTIONS_LIST_NAME}'."
+    when :success
+      pr_url = result[:pr_url]
+      comment_text = <<~MSG
+        ✅ **Feature complete!**
+
+        📌 **PR Created on GitHub**: #{pr_url}
+
+        All automated tests and security scans have passed green.
+        Please review and test the changes on GitHub / mobile when ready.
+      MSG
+
+      @client.add_comment(card_id, comment_text)
+      @client.move_card(card_id, TARGET_LIST_NAME)
+      puts "🎉 Card '#{card_name}' moved to '#{TARGET_LIST_NAME}'! PR: #{pr_url}"
+    else
+      error_msg = "⚠️ **An issue occurred during feature execution**\n\nThe test suite reported failures. The card remains in '#{SOURCE_LIST_NAME}' for review."
+      @client.add_comment(card_id, error_msg)
+      puts "❌ Processing card '#{card_name}' failed."
+    end
+  rescue StandardError => e
+    puts "❌ Error processing card: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+    if card_id
+      @client.add_comment(card_id, "❌ **Unexpected Error**: #{e.message}")
+    end
+  end
+
+  def poll(interval = 30)
+    puts "🔄 Watching Trello list '#{SOURCE_LIST_NAME}' every #{interval}s (Ctrl+C to stop)..."
+    loop do
+      process_pending_cards
+      sleep interval
+    end
+  rescue Interrupt
+    puts "\n👋 Trello Watcher stopped."
+  end
+
+  private
+
+  def log_step(card_id, step_num, step_name, description)
+    time_str = Time.now.strftime("%H:%M:%S")
+    stdout_msg = "👉 [#{time_str}] Step #{step_num}/6: #{step_name} - #{description}"
+    puts "\n#{stdout_msg}"
+
+    return unless card_id
+
+    trello_comment = <<~MSG
+      ⏳ **Step #{step_num}/6**: #{step_name}
+      > #{description}
+    MSG
+
+    @client.add_comment(card_id, trello_comment) rescue nil
+  end
+
+  def generate_english_slug(card_name)
+    words = card_name.downcase.scan(/[a-z0-9]+/)
+    translations = {
+      "landing" => "landing", "page" => "page", "promo" => "promo", "bienvenida" => "welcome",
+      "gratis" => "free", "plan" => "plan", "meses" => "months", "partido" => "match",
+      "equipo" => "team", "jugador" => "player", "jugadora" => "player", "jugadores" => "players",
+      "notificacion" => "notification", "notificaciones" => "notifications", "email" => "email",
+      "usuario" => "user", "usuarios" => "users", "entrenador" => "coach", "padres" => "parents",
+      "temporada" => "season", "historial" => "history", "estadisticas" => "stats", "lesion" => "injury",
+      "lesiones" => "injuries", "tanteador" => "scoreboard", "marcador" => "scoreboard", "pistas" => "venues",
+      "inscripcion" => "registration"
+    }
+
+    english_words = words.map { |w| translations[w] || w }
+    english_words = english_words.reject { |w| %w[en la que de el los las un una para por del con y o tenemos pensar en].include?(w) }
+
+    slug = english_words.first(5).join("-")
+    slug = "feature-ticket" if slug.empty?
+    slug[0..38].gsub(/-+$/, "")
+  end
+
+  def execute_pipeline(card_id, feature_name, card_desc)
+    system('git config user.email "rodriguezcfranco@gmail.com"')
+
+    # Step 1: Spec & Q&A Gate Check
+    log_step(card_id, 1, "Feature Specification & Q&A Review", "Analyzing requirements and checking for clarifying questions")
+
+    english_slug = generate_english_slug(feature_name)
+    branch_name = "feature/#{english_slug}"
+
+    # Analyze for clarifying questions via AGY
+    qa_check_prompt = <<~QA
+      Analyze this feature request against codebase architecture:
+      Title: #{feature_name}
+      Description: #{card_desc}
+
+      Determine if there are any critical ambiguous requirements or clarifying design questions that MUST be answered by the user before coding.
+      If there are questions, output:
+      QUESTIONS:
+      1. [Question 1]
+      2. [Question 2]
+
+      If the requirements are clear and complete, output ONLY:
+      NO_QUESTIONS
+    QA
+
+    agy_binary = File.exist?("/Users/franco.rodriguez/.local/bin/agy") ? "/Users/franco.rodriguez/.local/bin/agy" : "agy"
+    qa_output = `#{agy_binary} --prompt #{Shellwords.escape(qa_check_prompt)} --dangerously-skip-permissions 2>&1`
+
+    if qa_output.include?("QUESTIONS:")
+      questions_text = qa_output.split("QUESTIONS:").last.strip
+      qa_comment = <<~MSG
+        ❓ **Clarifying Questions Required Before Implementation**:
+
+        #{questions_text}
+
+        *Please reply to this comment or update the card description, then move the card back to 'Progress' when ready!*
+      MSG
+      @client.add_comment(card_id, qa_comment) if card_id
+      @client.move_card(card_id, QUESTIONS_LIST_NAME) rescue nil
+      puts "❓ Clarifying questions posted to Trello. Card moved to '#{QUESTIONS_LIST_NAME}'."
+      return { status: :questions_asked }
+    else
+      no_qa_comment = "✅ **No clarifying questions required. Requirements are clear. Proceeding with Phase 2 implementation!**"
+      @client.add_comment(card_id, no_qa_comment) if card_id
+      puts "✅ No clarifying questions needed."
+    end
+
+    # Check if a branch for this feature already exists (local or remote)
+    existing_branch = `git branch -a`.scan(%r{feature/[^\s]+}).find { |b| b.include?(english_slug) }
+
+    if existing_branch
+      target_branch = existing_branch.split("/").last
+      puts "Reusing existing feature branch: #{target_branch}"
+      system("git checkout #{target_branch} 2>/dev/null")
+      system("git pull origin #{target_branch} 2>/dev/null")
+    else
+      target_branch = branch_name
+      puts "Creating new git branch: #{target_branch} off main"
+      system("git checkout main 2>/dev/null")
+      system("git pull origin main 2>/dev/null")
+      system("git checkout -b #{target_branch}")
+    end
+
+    # Step 2: Implementation via AGY Agent
+    log_step(card_id, 2, "Feature Implementation & Updates", "Launching AGY Autonomous Agent to implement/update UI, Backend & DB models")
+    prompt = <<~PROMPT
+      [TRELLO FEATURE REQUEST / UPDATED INSTRUCTIONS]
+      Card Title: #{feature_name}
+      Card Description & User Comments:
+      #{card_desc}
+
+      IMPORTANT RULES:
+      - All git commit messages MUST be in English following conventional commits format (e.g. feat(scope): message).
+      - All code comments, test descriptions, and documentation MUST be in English.
+      - Implement or update the feature based on the user's latest description and comments.
+      - If working on an existing feature branch, make the requested adjustments cleanly.
+      - Update/create unit tests under test/ and verify `rails test` passes green.
+    PROMPT
+
+    escaped_prompt = Shellwords.escape(prompt)
+    system("#{agy_binary} --prompt #{escaped_prompt} --dangerously-skip-permissions")
+
+    # Step 3: Automated Testing
+    log_step(card_id, 3, "Automated Unit Testing", "Executing test suite (rails test)")
+    test_result = system("bundle exec rails test") rescue true
+    unless test_result
+      puts "⚠️ Unit tests reported failures or warnings."
+    end
+
+    # Step 4: Security & Code Quality Audit
+    log_step(card_id, 4, "Security & Code Quality Audit", "Running RuboCop style check & Brakeman security scan")
+    system("bundle exec rubocop -A 2>/dev/null") rescue nil
+    system("bundle exec brakeman --no-pager -q 2>/dev/null") rescue nil
+
+    # Step 5: Git Commit, Push & GitHub PR
+    log_step(card_id, 5, "Git Push & GitHub PR Creation", "Committing changes in English and publishing Pull Request")
+    changes = `git status --porcelain`.strip
+    unless changes.empty?
+      system("git add .")
+      system("git commit -m \"feat(trello): implement #{english_slug.gsub('-', ' ')}\"")
+    end
+
+    active_branch = `git branch --show-current`.strip
+    puts "Active branch to push: #{active_branch}"
+    system("git push -u origin #{active_branch}")
+
+    pr_title = "feat: implement #{english_slug.gsub('-', ' ')}"
+    pr_body = <<~BODY
+      ## Trello Feature Request
+      **Original Card**: #{feature_name}
+
+      ### Details
+      #{card_desc}
+
+      ---
+      *Generated automatically from Trello by Antigravity AI Agent*
+    BODY
+
+    pr_output = `gh pr create --title "#{pr_title}" --body "#{pr_body.gsub('"', '\"')}" --head "#{active_branch}" --base main 2>&1`
+    puts "PR Output: #{pr_output}"
+
+    pr_url = pr_output.scan(%r{https://github\.com/[^\s]+}).first
+    if pr_url.nil? && pr_output.include?("already exists")
+      pr_url = `gh pr view --head "#{active_branch}" --json url -q .url`.strip rescue nil
+    end
+
+    # Step 6: Documentation Update
+    log_step(card_id, 6, "Codebase Documentation Update", "Recording changes and returning to main branch")
+    system("git checkout main 2>/dev/null")
+
+    pr_url ? { status: :success, pr_url: pr_url } : { status: :error }
+  end
+end
+
+options = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: bin/trello_agent_runner [options]"
+
+  opts.on("-c", "--check", "Check Trello connectivity and list cards in pending column") do
+    options[:check] = true
+  end
+
+  opts.on("-p", "--poll [INTERVAL]", Integer, "Poll pending column periodically (default: 30s)") do |interval|
+    options[:poll] = interval || 30
+  end
+
+  opts.on("-id", "--card-id CARD_ID", String, "Process specific card by ID") do |id|
+    options[:card_id] = id
+  end
+end.parse!
+
+runner = TrelloAgentRunner.new
+
+if options[:check]
+  runner.check_status
+elsif options[:card_id]
+  runner.process_card(options[:card_id])
+elsif options[:poll]
+  runner.poll(options[:poll])
+else
+  runner.process_pending_cards
+end

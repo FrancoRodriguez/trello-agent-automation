@@ -1,0 +1,8 @@
+/.bundle
+/.env*
+!/.env*.example
+/log/*
+/tmp/*
+.antigravitycli/
+*.swp
+.DS_Store
