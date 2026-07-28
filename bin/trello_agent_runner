@@ -42,6 +42,7 @@ class TrelloAgentRunner
   def process_pending_cards
     progress_cards = @client.cards_in_list(SOURCE_LIST_NAME) rescue []
     question_cards = @client.cards_in_list(QUESTIONS_LIST_NAME) rescue []
+    testing_cards  = @client.cards_in_list(TARGET_LIST_NAME) rescue []
 
     # Filter question_cards to ONLY process those where the LAST comment is a user reply
     ready_question_cards = question_cards.select do |card|
@@ -55,10 +56,22 @@ class TrelloAgentRunner
       end
     end
 
-    all_cards = progress_cards + ready_question_cards
+    # Filter testing_cards to ONLY process those where the LAST comment is a new user feedback comment
+    ready_testing_cards = testing_cards.select do |card|
+      comments = @client.get_card_comments(card["id"])
+      last_comment = comments.first
+      if last_comment && !last_comment[:text].to_s.include?("Feature complete!") && !last_comment[:text].to_s.include?("PR Created on GitHub") && !last_comment[:text].to_s.include?("Step ")
+        puts "💡 New user feedback comment detected on card '#{card['name']}' in '#{TARGET_LIST_NAME}'! Updating PR..."
+        true
+      else
+        false
+      end
+    end
+
+    all_cards = progress_cards + ready_question_cards + ready_testing_cards
 
     if all_cards.empty?
-      puts "[#{Time.now.strftime('%H:%M:%S')}] No pending cards in '#{SOURCE_LIST_NAME}' or ready cards in '#{QUESTIONS_LIST_NAME}'."
+      puts "[#{Time.now.strftime('%H:%M:%S')}] No pending cards in '#{SOURCE_LIST_NAME}', '#{QUESTIONS_LIST_NAME}', or '#{TARGET_LIST_NAME}'."
       return
     end
 
