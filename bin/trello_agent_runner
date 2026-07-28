@@ -315,12 +315,15 @@ class TrelloAgentRunner
     puts "Active branch to push: #{active_branch}"
     system("git push -u origin #{active_branch}")
 
+    trello_card_url = card_id ? "https://trello.com/c/#{card_id}" : nil
+
     pr_title = "feat: implement #{english_slug.gsub('-', ' ')}"
     pr_body = <<~BODY
-      ## Trello Feature Request
-      **Original Card**: #{feature_name}
+      ## 📌 Trello Feature Request
+      - **Card**: [#{feature_name}](#{trello_card_url})
+      - **Card ID**: `#{card_id}`
 
-      ### Details
+      ### 📋 Requirements & Details
       #{card_desc}
 
       ---
