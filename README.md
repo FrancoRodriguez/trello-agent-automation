@@ -65,6 +65,18 @@ To use this framework, configure your Trello board with the following columns:
 
 ---
 
+## 🔔 Mobile Push Notifications Guide
+
+By default, Trello suppresses push notifications for actions performed by your own user account token (since Trello assumes you made those comments/moves yourself).
+
+To ensure instant mobile push notifications on iOS/Android:
+
+1. **Option A (Dedicated Bot Account - Recommended)**: Create a secondary free Trello account (e.g. `VolleyManager Bot`), invite it to your board, and generate `TRELLO_TOKEN` from that bot account.
+2. **Option B (Telegram / Push Webhook)**: Connect a Telegram bot or push notification webhook inside `bin/trello_agent_runner`.
+3. **Option C (Trello Board Watch)**: Open your mobile Trello app, navigate to the board or specific columns (`AI open questions` & `Testing`), and tap **"Watch"** (Seguir).
+
+---
+
 ## 🔑 Setup & Credentials Guide
 
 ### Step 1: Get Trello API Credentials

@@ -19,6 +19,14 @@ This skill connects **Trello** with **Google Antigravity / AGY AI Agents** and *
 
 ---
 
+## 🔔 Mobile Push Notifications Guide
+
+- **Option A (Dedicated Bot Account)**: Generate `TRELLO_TOKEN` from a dedicated bot account (e.g. `VolleyManager Bot`) to receive notifications for every action.
+- **Option B (Telegram Webhook)**: Send direct alerts to Telegram/Pushover.
+- **Option C (Board Watch)**: Enable "Watch" (Seguir) on the Trello board/columns from mobile app.
+
+---
+
 ## 🚀 Execution Commands
 
 ```bash
