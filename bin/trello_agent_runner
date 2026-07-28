@@ -156,7 +156,7 @@ class TrelloAgentRunner
   end
 
   def send_mobile_notification(title, message, url = nil)
-    topic = ENV.fetch("NTFY_TOPIC", "volleymanager_agent")
+    topic = ENV["NTFY_TOPIC"]
     return if topic.nil? || topic.empty?
 
     uri = URI("https://ntfy.sh/#{topic}")
