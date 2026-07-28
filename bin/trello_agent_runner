@@ -27,7 +27,7 @@ class TrelloAgentRunner
   end
 
   def check_status
-    puts "=== Trello Agent Integration Check ==="
+    puts "=== Volley Manager Trello Integration Check ==="
     puts "Board ID: #{@client.board_id}"
     all_lists = @client.lists
     puts "Lists available: #{all_lists.keys.uniq.inspect}"
@@ -100,6 +100,7 @@ class TrelloAgentRunner
     case result[:status]
     when :questions_asked
       puts "⏸️ Card '#{card_name}' paused: Clarifying questions asked. Card moved to '#{QUESTIONS_LIST_NAME}'."
+      send_mobile_notification("❓ Clarifying Questions Needed", "Card '#{card_name}' requires user feedback before coding.", "https://trello.com/c/#{card_id}")
     when :success
       pr_url = result[:pr_url]
       comment_text = <<~MSG
@@ -113,6 +114,7 @@ class TrelloAgentRunner
 
       @client.add_comment(card_id, comment_text)
       @client.move_card(card_id, TARGET_LIST_NAME)
+      send_mobile_notification("🚀 Feature PR Ready!", "Card '#{card_name}' completed cleanly. All tests passed!", pr_url)
       puts "🎉 Card '#{card_name}' moved to '#{TARGET_LIST_NAME}'! PR: #{pr_url}"
     else
       error_msg = "⚠️ **An issue occurred during feature execution**\n\nThe test suite reported failures. The card remains in '#{SOURCE_LIST_NAME}' for review."
@@ -153,6 +155,24 @@ class TrelloAgentRunner
     @client.add_comment(card_id, trello_comment) rescue nil
   end
 
+  def send_mobile_notification(title, message, url = nil)
+    topic = ENV.fetch("NTFY_TOPIC", "volleymanager_agent")
+    return if topic.nil? || topic.empty?
+
+    uri = URI("https://ntfy.sh/#{topic}")
+    req = Net::HTTP::Post.new(uri)
+    req.body = message
+    req["Title"] = title
+    req["Tags"] = "robot,rocket"
+    req["Click"] = url if url
+
+    Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
+      http.request(req)
+    end
+  rescue StandardError => e
+    puts "Push notification skipped: #{e.message}"
+  end
+
   def generate_english_slug(card_name)
     words = card_name.downcase.scan(/[a-z0-9]+/)
     translations = {
@@ -179,6 +199,8 @@ class TrelloAgentRunner
 
     # Step 1: Spec & Q&A Gate Check
     log_step(card_id, 1, "Feature Specification & Q&A Review", "Analyzing requirements and checking for clarifying questions")
+    system("git checkout main 2>/dev/null")
+    system("git pull origin main 2>/dev/null")
 
     english_slug = generate_english_slug(feature_name)
     branch_name = "feature/#{english_slug}"
@@ -258,15 +280,15 @@ class TrelloAgentRunner
 
     # Step 3: Automated Testing
     log_step(card_id, 3, "Automated Unit Testing", "Executing test suite (rails test)")
-    test_result = system("bundle exec rails test") rescue true
+    test_result = system("bundle exec rails test")
     unless test_result
       puts "⚠️ Unit tests reported failures or warnings."
     end
 
     # Step 4: Security & Code Quality Audit
     log_step(card_id, 4, "Security & Code Quality Audit", "Running RuboCop style check & Brakeman security scan")
-    system("bundle exec rubocop -A 2>/dev/null") rescue nil
-    system("bundle exec brakeman --no-pager -q 2>/dev/null") rescue nil
+    system("bundle exec rubocop -A")
+    system("bundle exec brakeman --no-pager -q")
 
     # Step 5: Git Commit, Push & GitHub PR
     log_step(card_id, 5, "Git Push & GitHub PR Creation", "Committing changes in English and publishing Pull Request")
@@ -297,7 +319,7 @@ class TrelloAgentRunner
 
     pr_url = pr_output.scan(%r{https://github\.com/[^\s]+}).first
     if pr_url.nil? && pr_output.include?("already exists")
-      pr_url = `gh pr view --head "#{active_branch}" --json url -q .url`.strip rescue nil
+      pr_url = `gh pr view --json url -q .url`.strip rescue nil
     end
 
     # Step 6: Documentation Update
