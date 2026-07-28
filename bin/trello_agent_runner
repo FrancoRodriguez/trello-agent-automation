@@ -158,6 +158,8 @@ class TrelloAgentRunner
     stdout_msg = "👉 [#{time_str}] Step #{step_num}/6: #{step_name} - #{description}"
     puts "\n#{stdout_msg}"
 
+    send_mobile_notification("⏳ Step #{step_num}/6: #{step_name}", description)
+
     return unless card_id
 
     trello_comment = <<~MSG
