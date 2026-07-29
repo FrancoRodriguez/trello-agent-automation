@@ -130,6 +130,7 @@ make test
 ## 🛠️ Key Features
 
 - **Standardized Pipeline**: Always executes the 6-step workflow ([feature-development-pipeline-skill](https://github.com/FrancoRodriguez/feature-development-pipeline-skill)).
+- **Strict English Output Policy**: All git commits, branch names, PR descriptions, documentation, and code comments are ALWAYS generated in English, regardless of the language used in Trello cards or comments.
 - **Mobile First**: Initiate features, answer questions, and receive push notifications via `ntfy.sh` directly from your smartphone via Trello.
 - **Smart Q&A Review Gate**: Evaluates requirements against codebase architecture before coding. If ambiguous, posts questions and pauses cleanly until you reply.
 - **Iterative Feedback Loop**: Add comments or update instructions on Trello at any time; the agent picks up your replies, checks out the existing feature branch, and updates the PR seamlessly.
@@ -141,3 +142,4 @@ make test
 ## 📄 License
 
 [MIT License](LICENSE) © 2026 Franco Rodriguez
+

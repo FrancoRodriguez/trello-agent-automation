@@ -37,7 +37,14 @@ The agent natively supports instant mobile push notifications via **[ntfy.sh](ht
 
 ---
 
+## 🌐 Strict English Output Policy
+
+All git commit messages, branch names, pull request descriptions, documentation, code comments, and unit test descriptions **MUST ALWAYS** be generated in English — even if the user's Trello card title, description, or comment is in Spanish or another language.
+
+---
+
 ## 🚀 Execution Commands
+
 
 ```bash
 # Verify connection & status
