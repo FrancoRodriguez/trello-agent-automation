@@ -2,7 +2,7 @@
 
 An autonomous, mobile-first workflow integration that connects **Trello** (mobile board management) with **Google Antigravity / AGY AI Agents** and **GitHub Pull Requests**.
 
-This framework allows software engineers and product owners to request features, bug fixes, or enhancements from their mobile devices using Trello, and have an autonomous AI agent code the feature, run pre-flight tests/security scans, open a clean GitHub Pull Request, and notify Trello in real time.
+This framework executes the standard 6-step feature development pipeline ([feature-development-pipeline-skill](https://github.com/FrancoRodriguez/feature-development-pipeline-skill)) whenever a card is moved to `Progress`.
 
 ---
 
@@ -22,11 +22,13 @@ This is a **Remote Mobile AI Developer Agent Pipeline & Skill**. It turns a Trel
 
 ## 🔄 How The 6-Step Pipeline Works
 
+This framework enforces the [feature-development-pipeline-skill](https://github.com/FrancoRodriguez/feature-development-pipeline-skill) workflow:
+
 ```mermaid
 sequenceDiagram
     autonumber
     actor User as Mobile Phone (Trello App)
-    participant Trello as Trello Board (VoleyManager)
+    participant Trello as Trello Board
     participant Watcher as trello_agent_runner (Local Daemon)
     participant AGY as Google Antigravity Agent (AGY CLI)
     participant GitHub as GitHub Repository
@@ -41,10 +43,10 @@ sequenceDiagram
         AGY-->>Trello: Post "No questions required. Proceeding!"
     end
     Watcher->>AGY: 4. Step 2: Feature Implementation (UI, Backend, DB)
-    Watcher->>Watcher: 5. Step 3 & 4: Automated Testing & Security Scans (rails test, rubocop, brakeman)
+    Watcher->>Watcher: 5. Step 3 & 4: Automated Testing & Security Scans (rspec / rails test, rubocop, brakeman)
     Watcher->>GitHub: 6. Step 5 & 6: Create English Git Branch, Commit, Push & gh pr create
     Watcher->>Trello: 7. Comment PR link & Move card to 'Testing'
-    Trello-->>User: 8. Send Mobile Push Notification
+    Trello-->>User: 8. Send Mobile Push Notification (ntfy.sh)
     User->>GitHub: 9. Review & Merge Pull Request
 ```
 
@@ -65,15 +67,16 @@ To use this framework, configure your Trello board with the following columns:
 
 ---
 
-## 🔔 Mobile Push Notifications Guide
+## 🔔 Mobile Push Notifications Guide (ntfy.sh)
 
-By default, Trello suppresses push notifications for actions performed by your own user account token (since Trello assumes you made those comments/moves yourself).
+The agent includes built-in support for instant mobile push notifications via **[ntfy.sh](https://ntfy.sh)**:
 
-To ensure instant mobile push notifications on iOS/Android:
-
-1. **Option A (Dedicated Bot Account - Recommended)**: Create a secondary free Trello account (e.g. `VolleyManager Bot`), invite it to your board, and generate `TRELLO_TOKEN` from that bot account.
-2. **Option B (Telegram / Push Webhook)**: Connect a Telegram bot or push notification webhook inside `bin/trello_agent_runner`.
-3. **Option C (Trello Board Watch)**: Open your mobile Trello app, navigate to the board or specific columns (`AI open questions` & `Testing`), and tap **"Watch"** (Seguir).
+1. **Install App**: Download free **ntfy** on iOS App Store or Google Play.
+2. **Subscribe**: Create and subscribe to a private topic (e.g. `my_project_dev_alerts`).
+3. **Set Environment Variable**: Add `NTFY_TOPIC=my_project_dev_alerts` in your `.env`.
+4. **Instant Alerts**: Receive push alerts when:
+   - ❓ Clarifying questions require user input (`AI open questions`).
+   - 🚀 A Pull Request has been published and all tests passed green (`Testing`).
 
 ---
 
@@ -101,6 +104,7 @@ TRELLO_SOURCE_LIST=Progress
 TRELLO_WORKING_LIST=AI in progress
 TRELLO_QUESTIONS_LIST=AI open questions
 TRELLO_TARGET_LIST=Testing
+NTFY_TOPIC=your_ntfy_topic
 ```
 
 ---
@@ -125,11 +129,12 @@ make test
 
 ## 🛠️ Key Features
 
-- **Mobile First**: Initiate features, answer questions, and review PR notifications directly from your smartphone via Trello.
+- **Standardized Pipeline**: Always executes the 6-step workflow ([feature-development-pipeline-skill](https://github.com/FrancoRodriguez/feature-development-pipeline-skill)).
+- **Mobile First**: Initiate features, answer questions, and receive push notifications via `ntfy.sh` directly from your smartphone via Trello.
 - **Smart Q&A Review Gate**: Evaluates requirements against codebase architecture before coding. If ambiguous, posts questions and pauses cleanly until you reply.
 - **Iterative Feedback Loop**: Add comments or update instructions on Trello at any time; the agent picks up your replies, checks out the existing feature branch, and updates the PR seamlessly.
 - **Clean Git Hygiene**: Automatically creates fresh, isolated feature branches off `main` in English, eliminating branch pollution.
-- **Security & Quality Gated**: Only opens PRs after 100% of unit tests (`rails test`), style checks (`rubocop`), and security audits (`brakeman`) pass green.
+- **Security & Quality Gated**: Only opens PRs after 100% of unit tests (`rspec` / `rails test`), style checks (`rubocop`), and security audits (`brakeman`) pass green.
 
 ---
 
